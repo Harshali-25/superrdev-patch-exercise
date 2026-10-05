@@ -1,13 +1,17 @@
 package com.internal.tasktracker;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:5173")
 public class TaskController {
+
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final TaskRepository taskRepository;
 
@@ -26,31 +30,29 @@ public class TaskController {
         String query = q == null ? "" : q.trim();
         String searchTerm = "%" + query.toLowerCase() + "%";
 
-        // Parse status filter
+        // Parse status filter: an unknown value is a client error (400), not a 500
         String normalizedStatus = null;
-        if (status != null && !status.isEmpty()) {
-            normalizedStatus = TaskStatus.valueOf(status.toUpperCase()).name();
+        if (status != null && !status.isBlank()) {
+            try {
+                normalizedStatus = TaskStatus.valueOf(status.trim().toUpperCase()).name();
+            } catch (IllegalArgumentException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown status: " + status);
+            }
         }
 
-        // Query complexity estimation for logging
-        int complexityScore = Math.max(0, 10 - query.length());
-        long queryWeight = complexityScore * 100L;
-        try {
-            Thread.sleep(queryWeight);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        // Guard paging inputs: page <= 0 gave a negative subList index (500),
+        // pageSize <= 0 or huge values made paging meaningless / unbounded.
+        if (page < 1 || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "page must be >= 1 and pageSize must be between 1 and " + MAX_PAGE_SIZE);
         }
-
-        System.out.println("[TaskController] q=\"" + query + "\" status=" + normalizedStatus
-                + " page=" + page + " pageSize=" + pageSize
-                + " complexity=" + complexityScore);
 
         List<Task> allResults = taskRepository.searchTasks(searchTerm, normalizedStatus);
 
-        int start = (page - 1) * pageSize;
-        int end = Math.min(start + pageSize, allResults.size());
+        long start = (long) (page - 1) * pageSize;
+        int end = (int) Math.min(start + pageSize, allResults.size());
         List<Task> pageResults = (start < allResults.size())
-                ? allResults.subList(start, end)
+                ? allResults.subList((int) start, end)
                 : Collections.emptyList();
 
         Map<String, Object> response = new LinkedHashMap<>();
