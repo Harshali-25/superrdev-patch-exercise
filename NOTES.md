@@ -1,22 +1,32 @@
 # NOTES
 
 ## Summary of changes
-1. **SQL precedence** (`TaskRepository`, `db/queries/search_tasks.sql`, Oracle package count + cursor): `A AND B OR C AND D` parsed as `(A AND B) OR (C AND D)`, so archived tasks leaked and the status filter was ignored for title matches. Parenthesised the title/description match; added `id` as an ORDER BY tie-breaker for stable paging.
-2. **Controller**: removed a `Thread.sleep` that delayed short/empty queries up to 1s. Unknown `status` now returns 400 (was 500). `page < 1` and `pageSize` outside 1..100 return 400 (negative `subList` index was a 500).
-3. **`useTasks`**: stale responses could overwrite newer ones, so requests are aborted with `AbortController`. `loading` stuck on after errors and `error` never cleared; both fixed.
-4. **`App`**: 300ms search debounce; reset to page 1 when query/status changes.
-5. **Oracle**: `v_term VARCHAR2(257)` failed for terms over 255 chars.
+
+1.SQL search: Fixed the `AND`/`OR` precedence problem in the task search queries. Added parentheses so archived tasks are always excluded and the status filter works correctly. Added `id` as a tie-breaker in `ORDER BY` for more stable pagination.
+
+2.Controller: Removed the artificial `Thread.sleep()` delay. Invalid `status` now returns `400` instead of `500`. Also added validation for `page` and `pageSize`; `page < 1` and `pageSize` outside `1..100` return `400`.
+
+3. Frontend requests: Updated `useTasks` to use `AbortController` so an older request is cancelled when a newer search, status, or page request starts. Cancelled requests do not update the state. Fixed loading and error state handling.
+
+4. Search and pagination: Added a 300ms debounce so typing does not send a request for every key press. The page resets to page 1 when the debounced query or status changes.
+
+5.Oracle SQL:Fixed the `VARCHAR2` term length so longer search terms can be handled.
 
 ## Not changed
-- Pagination is still in memory. Proper fix is DB `LIMIT/OFFSET` plus a count query, a bigger diff than a patch warrants.
-- LIKE wildcards (`%`, `_`) in input are not escaped.
-- `System.out.println` logging left alone.
+
+- Pagination is still performed in memory. Moving it to the database with `LIMIT/OFFSET` and a count query would require a larger change.
+- `LIKE` wildcards such as `%` and `_` are not escaped.
+- Existing `System.out.println` logging was left unchanged.
 
 ## Biggest remaining risk
-In-memory pagination loads every matching row per request, and `LIKE '%x%'` cannot use an index, so this degrades as the table grows. No auth either.
+
+In-memory pagination loads all matching rows for every request. Also, `LIKE '%x%'` can become slow as the number of tasks grows.
 
 ## Assumptions
-- 400 is right for bad input; max page size 100 is reasonable.
+
+- `400 Bad Request` is appropriate for invalid input.
+- Maximum `pageSize` of 100 is reasonable.
 
 ## Tools / AI used
-Used Claude to review the code and draft fixes; I reviewed each change. Verified the SQL fix by running old vs new query on the seed data (old leaked 2 archived rows for `q=api`). Frontend builds. I could not run the Spring Boot backend in my environment, so the Java changes are untested at runtime.
+
+I used Claude to review the code, explain the bugs, and help with the fixes. I reviewed the changes myself and ran the application to test the API and frontend behavior.
